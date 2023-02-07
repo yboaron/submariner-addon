@@ -35,9 +35,17 @@ type ManagedClusterAddOnSpec struct {
 	// installNamespace is the namespace on the managed cluster to install the addon agent.
 	// If it is not set, open-cluster-management-agent-addon namespace is used to install the addon agent.
 	// +optional
+	// +kubebuilder:default=open-cluster-management-agent-addon
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
 	InstallNamespace string `json:"installNamespace,omitempty"`
+
+	// configs is a list of add-on configurations.
+	// In scenario where the current add-on has its own configurations.
+	// An empty list means there are no defautl configurations for add-on.
+	// The default is an empty list
+	// +optional
+	Configs []AddOnConfig `json:"configs,omitempty"`
 }
 
 // RegistrationConfig defines the configuration of the addon agent to register to hub. The Klusterlet agent will
@@ -58,6 +66,14 @@ type RegistrationConfig struct {
 	//
 	// +optional
 	Subject Subject `json:"subject,omitempty"`
+}
+
+type AddOnConfig struct {
+	// group and resource of add-on configuration.
+	ConfigGroupResource `json:",inline"`
+
+	// name and namespace of add-on configuration.
+	ConfigReferent `json:",inline"`
 }
 
 // Subject is the user subject of the addon agent to be registered to the hub.
@@ -94,12 +110,18 @@ type ManagedClusterAddOnStatus struct {
 	// addOnMeta is a reference to the metadata information for the add-on.
 	// This should be same as the addOnMeta for the corresponding ClusterManagementAddOn resource.
 	// +optional
-	AddOnMeta AddOnMeta `json:"addOnMeta"`
+	AddOnMeta AddOnMeta `json:"addOnMeta,omitempty"`
 
+	// Deprecated: Use configReference instead
 	// addOnConfiguration is a reference to configuration information for the add-on.
 	// This resource is use to locate the configuration resource for the add-on.
 	// +optional
-	AddOnConfiguration ConfigCoordinates `json:"addOnConfiguration"`
+	AddOnConfiguration ConfigCoordinates `json:"addOnConfiguration,omitempty"`
+
+	// configReferences is a list of current add-on configuration references.
+	// This will be overridden by the clustermanagementaddon configuration references.
+	// +optional
+	ConfigReferences []ConfigReference `json:"configReferences,omitempty"`
 
 	// registrations is the conifigurations for the addon agent to register to hub. It should be set by each addon controller
 	// on hub to define how the addon agent on managedcluster is registered. With the registration defined,
@@ -126,6 +148,9 @@ const (
 	// ManagedClusterAddOnConditionDegraded represents that the addon agent is providing degraded service on
 	// the managed cluster.
 	ManagedClusterAddOnConditionDegraded string = "Degraded"
+
+	// ManagedClusterAddOnCondtionConfigured represents that the addon agent is configured with its configuration
+	ManagedClusterAddOnCondtionConfigured string = "Configured"
 )
 
 // ObjectReference contains enough information to let you inspect or modify the referred object.
@@ -145,6 +170,21 @@ type ObjectReference struct {
 	// +kubebuilder:validation:Required
 	// +required
 	Name string `json:"name"`
+}
+
+// ConfigReference is a reference to the current add-on configuration.
+// This resource is used to locate the configuration resource for the current add-on.
+type ConfigReference struct {
+	// This field is synced from ClusterManagementAddOn configGroupResource field.
+	ConfigGroupResource `json:",inline"`
+
+	// This field is synced from ClusterManagementAddOn defaultConfig and ManagedClusterAddOn config fields.
+	// If both of them are defined, the ManagedClusterAddOn configs will overwrite the ClusterManagementAddOn
+	// defaultConfigs.
+	ConfigReferent `json:",inline"`
+
+	// lastObservedGeneration is the observed generation of the add-on configuration.
+	LastObservedGeneration int64 `json:"lastObservedGeneration"`
 }
 
 // HealthCheckMode indicates the mode for the addon to check its healthiness status
@@ -176,3 +216,57 @@ type ManagedClusterAddOnList struct {
 
 	Items []ManagedClusterAddOn `json:"items"`
 }
+
+const (
+	// Label and annotation keys set on ManagedClusterAddon.
+
+	// AddonLabelKey is the label key to set addon name. It is to set on the resources on the hub relating
+	// to an addon
+	AddonLabelKey = "open-cluster-management.io/addon-name"
+
+	// DisableAddonAutomaticInstallationAnnotationKey is the annotation key for disabling the functionality of
+	// installing addon automatically. it should be set on ManagedClusterAddon resource only.
+	DisableAddonAutomaticInstallationAnnotationKey = "addon.open-cluster-management.io/disable-automatic-installation"
+
+	// AddonNamespaceLabelKey is the label key to set namespace of ManagedClusterAddon.
+	AddonNamespaceLabelKey = "open-cluster-management.io/addon-namespace"
+
+	// Label and annotation keys set on manifests of addon agent.
+
+	// AddonPreDeleteHookLabelKey is the label key to identify that a resource manifest is used as pre-delete hook for an addon
+	// and should be created and deleted before the specified ManagedClusterAddon is deleted.
+	// Deprecated, and will be removed in the future release, please use annotation AddonPreDeleteHookAnnotationKey from v0.10.0.
+	AddonPreDeleteHookLabelKey = "open-cluster-management.io/addon-pre-delete"
+
+	// AddonPreDeleteHookAnnotationKey is the annotation key to identify that a resource manifest is used as pre-delete hook for an addon
+	// and should be created and deleted before the specified ManagedClusterAddon is deleted.
+	AddonPreDeleteHookAnnotationKey = "addon.open-cluster-management.io/addon-pre-delete"
+
+	// HostingClusterNameAnnotationKey is the annotation key for indicating the hosting cluster name, it should be set
+	// on ManagedClusterAddon resource only.
+	HostingClusterNameAnnotationKey = "addon.open-cluster-management.io/hosting-cluster-name"
+
+	// DeletionOrphanAnnotationKey is an annotation for the manifest of addon indicating that it will not be cleaned up
+	// after the addon is deleted.
+	DeletionOrphanAnnotationKey = "addon.open-cluster-management.io/deletion-orphan"
+
+	// HostedManifestLocationLabelKey is the label key to identify where a resource manifest of addon agent
+	// with this label should be deployed in Hosted mode.
+	// Deprecated, will be removed in the future release, please use annotation HostedManifestLocationAnnotationKey from v0.10.0.
+	HostedManifestLocationLabelKey = "addon.open-cluster-management.io/hosted-manifest-location"
+
+	// HostedManifestLocationAnnotationKey is the annotation key to identify where a resource manifest of addon agent
+	// with this annotation should be deployed in Hosted mode.
+	HostedManifestLocationAnnotationKey = "addon.open-cluster-management.io/hosted-manifest-location"
+
+	// HostedManifestLocationManagedValue is a value of the annotation HostedManifestLocationAnnotationKey,
+	// indicates the manifest will be deployed on the managed cluster in Hosted mode,
+	// it is the default value of a manifest in Hosted mode.
+	HostedManifestLocationManagedValue = "managed"
+	// HostedManifestLocationHostingValue is a value of the annotation HostedManifestLocationAnnotationKey,
+	// indicates the manifest will be deployed on the hosting cluster in Hosted mode.
+	HostedManifestLocationHostingValue = "hosting"
+	// HostedManifestLocationNoneValue is a value of the annotation HostedManifestLocationAnnotationKey,,
+	// indicates the manifest will not be deployed in Hosted mode.
+	HostedManifestLocationNoneValue = "none"
+)
